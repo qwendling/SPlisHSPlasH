@@ -6,7 +6,17 @@ set(WCSPH_HEADER_FILES
 set(WCSPH_SOURCE_FILES
 	WCSPH/SimulationDataWCSPH.cpp
 	WCSPH/TimeStepWCSPH.cpp
-	)		
+	)
+    
+set(PBD_HEADER_FILES
+	PBD/SimulationDataPBD.h
+	PBD/TimeStepPBD.h
+	)
+	
+set(PBD_SOURCE_FILES
+	PBD/SimulationDataPBD.cpp
+	PBD/TimeStepPBD.cpp
+	)	
 	
 set(PCISPH_HEADER_FILES
 	PCISPH/SimulationDataPCISPH.h
@@ -135,6 +145,7 @@ set(ELASTICITY_HEADER_FILES
 	Elasticity/Elasticity_Becker2009.h	
 	Elasticity/Elasticity_Peer2018.h
 	Elasticity/Elasticity_Kugelstadt2021.h
+	Elasticity/Elasticity_Wendling2024.h
 	)
 	
 set(ELASTICITY_SOURCE_FILES
@@ -142,6 +153,7 @@ set(ELASTICITY_SOURCE_FILES
 	Elasticity/Elasticity_Becker2009.cpp
 	Elasticity/Elasticity_Peer2018.cpp
 	Elasticity/Elasticity_Kugelstadt2021.cpp
+	Elasticity/Elasticity_Wendling2024.cpp
 	)
 	
 set(UTILS_HEADER_FILES
@@ -239,6 +251,9 @@ add_library(SPlisHSPlasH
 	${WCSPH_HEADER_FILES}
 	${WCSPH_SOURCE_FILES}
 	
+	${PBD_HEADER_FILES}
+	${PBD_SOURCE_FILES}
+	
 	${PCISPH_HEADER_FILES}
 	${PCISPH_SOURCE_FILES}
 	
@@ -301,6 +316,8 @@ target_link_libraries(SPlisHSPlasH
 
 source_group("Header Files\\WCSPH" FILES ${WCSPH_HEADER_FILES})
 source_group("Source Files\\WCSPH" FILES ${WCSPH_SOURCE_FILES})
+source_group("Header Files\\PBD" FILES ${PBD_HEADER_FILES})
+source_group("Source Files\\PBD" FILES ${PBD_SOURCE_FILES})
 source_group("Header Files\\PCISPH" FILES ${PCISPH_HEADER_FILES})
 source_group("Source Files\\PCISPH" FILES ${PCISPH_SOURCE_FILES})
 source_group("Header Files\\PBF" FILES ${PBF_HEADER_FILES})
