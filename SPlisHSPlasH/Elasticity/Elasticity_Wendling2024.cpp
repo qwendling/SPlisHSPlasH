@@ -125,6 +125,10 @@ void Elasticity_Wendling2024::initValues() {
   computeMatrixL();
 }
 
+void Elasticity_Wendling2024::computeConstraintH() {}
+void Elasticity_Wendling2024::computeConstraintD() {}
+void Elasticity_Wendling2024::computeZeroEnergy() {}
+
 void Elasticity_Wendling2024::step() {
   START_TIMING("Elasticity_Wendling2024")
   // apply accelerations
@@ -143,6 +147,10 @@ void Elasticity_Wendling2024::step() {
   }
 
   START_TIMING("Elasticity")
+
+  computeConstraintH();
+  computeConstraintD();
+  computeZeroEnergy();
 
   STOP_TIMING_AVG
 }

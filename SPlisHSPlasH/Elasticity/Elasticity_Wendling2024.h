@@ -27,6 +27,9 @@ protected:
 
   void initValues();
   void computeMatrixL();
+  void computeConstraintH();
+  void computeConstraintD();
+  void computeZeroEnergy();
 
   virtual void initParameters();
   /** This function is called after the simulation scene is loaded and all
