@@ -20,6 +20,9 @@ protected:
   std::vector<Real> m_restVolumes;
   std::vector<Matrix3r> m_L;
   std::vector<Matrix3r> m_F;
+  std::vector<double> m_CD;
+  std::vector<double> m_CH;
+
   unsigned int m_iterations;
   unsigned int m_maxIter;
   Real m_maxError;

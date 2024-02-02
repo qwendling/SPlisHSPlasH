@@ -125,7 +125,55 @@ void Elasticity_Wendling2024::initValues() {
   computeMatrixL();
 }
 
-void Elasticity_Wendling2024::computeConstraintH() {}
+void Elasticity_Wendling2024::computeConstraintH() {
+  Simulation *sim = Simulation::getCurrent();
+  const unsigned int numParticles = m_model->numActiveParticles();
+  FluidModel *model = m_model;
+  Real mu = m_youngsModulus / (static_cast<Real>(2.0) *
+                               (static_cast<Real>(1.0) + m_poissonRatio));
+  Real lambda =
+      m_youngsModulus * m_poissonRatio /
+      ((static_cast<Real>(1.0) + m_poissonRatio) *
+       (static_cast<Real>(1.0) - static_cast<Real>(2.0) * m_poissonRatio));
+
+#pragma omp parallel default(shared)
+  {
+#pragma omp for schedule(static)
+    for (int i = 0; i < (int)numParticles; i++) {
+      const unsigned int i0 = m_current_to_initial_index[i];
+      const Vector3r &xi = m_model->getPosition(i);
+      const Vector3r &xi0 = m_model->getPosition0(i0);
+
+      m_F[i].setZero();
+      Matrix3r &F = m_F[i];
+
+      const size_t numNeighbors = m_initialNeighbors[i0].size();
+
+      //////////////////////////////////////////////////////////////////////////
+      // Fluid
+      //////////////////////////////////////////////////////////////////////////
+      for (unsigned int j = 0; j < numNeighbors; j++) {
+        const unsigned int neighborIndex =
+            m_initial_to_current_index[m_initialNeighbors[i0][j]];
+        // get initial neighbor index considering the current particle order
+        const unsigned int neighborIndex0 = m_initialNeighbors[i0][j];
+
+        const Vector3r &xj = model->getPosition(neighborIndex);
+        const Vector3r &xj0 = m_model->getPosition0(neighborIndex0);
+        const Vector3r xj_xi = xj - xi;
+        const Vector3r xi_xj_0 = xi0 - xj0;
+        const Vector3r correctedKernel = m_L[i] * sim->gradW(xi_xj_0);
+        F += m_restVolumes[neighborIndex] * xj_xi * correctedKernel.transpose();
+      }
+
+      if (sim->is2DSimulation())
+        F(2, 2) = 1.0;
+
+      m_CD[i] = sqrt((F.transpose() * F).trace());
+      m_CH[i] = F.determinant() - (1 + mu / lambda);
+    }
+  }
+}
 void Elasticity_Wendling2024::computeConstraintD() {}
 void Elasticity_Wendling2024::computeZeroEnergy() {}
 
