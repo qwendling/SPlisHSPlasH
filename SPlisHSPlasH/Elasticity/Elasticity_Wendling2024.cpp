@@ -22,6 +22,16 @@ Elasticity_Wendling2024::Elasticity_Wendling2024(FluidModel *model)
   m_initialNeighbors.resize(numParticles);
   m_L.resize(numParticles);
   m_F.resize(numParticles);
+  m_CH.resize(numParticles);
+  m_CD.resize(numParticles);
+  m_dFdX.resize(numParticles);
+  m_dX.resize(numParticles);
+  m_pos_prev.resize(numParticles);
+
+  m_lambdaH.resize(numParticles);
+  m_lambdaD.resize(numParticles);
+  m_dCDdF.resize(numParticles);
+  m_dCHdF.resize(numParticles);
 
   m_iterations = 0;
   m_maxIter = 100;
@@ -123,12 +133,42 @@ void Elasticity_Wendling2024::initValues() {
   determineFixedParticles();
 
   computeMatrixL();
+
+#pragma omp parallel default(shared)
+  {
+#pragma omp for schedule(static)
+    for (int i = 0; i < (int)numParticles; i++) {
+      const unsigned int i0 = m_current_to_initial_index[i];
+      const Vector3r &xi0 = m_model->getPosition0(i0);
+
+      m_dFdX[i].setZero();
+
+      const size_t numNeighbors = m_initialNeighbors[i0].size();
+
+      //////////////////////////////////////////////////////////////////////////
+      // Fluid
+      //////////////////////////////////////////////////////////////////////////
+      for (unsigned int j = 0; j < numNeighbors; j++) {
+        const unsigned int neighborIndex =
+            m_initial_to_current_index[m_initialNeighbors[i0][j]];
+        // get initial neighbor index considering the current particle order
+        const unsigned int neighborIndex0 = m_initialNeighbors[i0][j];
+        const Vector3r &xj0 = m_model->getPosition0(neighborIndex0);
+        const Vector3r xi_xj_0 = xi0 - xj0;
+        const Vector3r correctedKernel = m_L[i] * sim->gradW(xi_xj_0);
+        m_dFdX[i] += m_restVolumes[neighborIndex] * correctedKernel;
+      }
+    }
+  }
 }
 
 void Elasticity_Wendling2024::computeConstraintH() {
   Simulation *sim = Simulation::getCurrent();
   const unsigned int numParticles = m_model->numActiveParticles();
   FluidModel *model = m_model;
+
+  const Real dt = TimeManager::getCurrent()->getTimeStepSize();
+
   Real mu = m_youngsModulus / (static_cast<Real>(2.0) *
                                (static_cast<Real>(1.0) + m_poissonRatio));
   Real lambda =
@@ -144,8 +184,8 @@ void Elasticity_Wendling2024::computeConstraintH() {
       const Vector3r &xi = m_model->getPosition(i);
       const Vector3r &xi0 = m_model->getPosition0(i0);
 
-      m_F[i].setZero();
       Matrix3r &F = m_F[i];
+      F.setZero();
 
       const size_t numNeighbors = m_initialNeighbors[i0].size();
 
@@ -170,9 +210,89 @@ void Elasticity_Wendling2024::computeConstraintH() {
         F(2, 2) = 1.0;
 
       m_CD[i] = sqrt((F.transpose() * F).trace());
-      m_CH[i] = F.determinant() - (1 + mu / lambda);
+      m_CH[i] = F.determinant() - (1. + mu / lambda);
+      // m_CH[i] = F.determinant() - (1.);
+
+      Matrix3r &dCDdF = m_dCDdF[i];
+      dCDdF = F / m_CD[i];
+      double alphaD = 1. / (mu * m_restVolumes[i]);
+
+      Matrix3r &dCHdF = m_dCHdF[i];
+      dCHdF.col(0) = F.col(1).cross(F.col(2));
+      dCHdF.col(1) = F.col(2).cross(F.col(0));
+      dCHdF.col(2) = F.col(0).cross(F.col(1));
+      double alphaH = 1. / (lambda * m_restVolumes[i]);
+
+      double denumH =
+          1. / model->getMass(i) * (-dCHdF * m_dFdX[i0]).squaredNorm();
+      double denumD =
+          1. / model->getMass(i) * (-dCDdF * m_dFdX[i0]).squaredNorm();
+
+      for (unsigned int j = 0; j < numNeighbors; j++) {
+        const unsigned int neighborIndex =
+            m_initial_to_current_index[m_initialNeighbors[i0][j]];
+        if ((int)neighborIndex == i)
+          continue;
+        // get initial neighbor index considering the current particle order
+        const unsigned int neighborIndex0 = m_initialNeighbors[i0][j];
+
+        const Vector3r &xj0 = m_model->getPosition0(neighborIndex0);
+        const Vector3r xi_xj_0 = xi0 - xj0;
+        const Vector3r correctedKernel = m_L[i] * sim->gradW(xi_xj_0);
+        denumH += 1. / model->getMass(neighborIndex) *
+                  (dCHdF * m_restVolumes[neighborIndex] * correctedKernel)
+                      .squaredNorm();
+        denumD += 1. / model->getMass(neighborIndex) *
+                  (dCDdF * m_restVolumes[neighborIndex] * correctedKernel)
+                      .squaredNorm();
+      }
+
+      denumD += alphaD / (dt * dt);
+      denumH += alphaH / (dt * dt);
+
+      m_lambdaH[i] = -m_CH[i] / denumH;
+      m_lambdaD[i] = -m_CD[i] / denumD;
+
+      m_dX[i] = 1. / model->getMass(i) * -dCHdF * m_dFdX[i0] * m_lambdaH[i];
+      m_dX[i] += 1. / model->getMass(i) * -dCDdF * m_dFdX[i0] * m_lambdaD[i];
     }
   }
+  START_TIMING("COMPUTE_DX")
+#pragma omp parallel default(shared)
+  {
+#pragma omp for schedule(static)
+    for (int i = 0; i < (int)numParticles; i++) {
+      const unsigned int i0 = m_current_to_initial_index[i];
+      const Vector3r &xi0 = m_model->getPosition0(i0);
+
+      const size_t numNeighbors = m_initialNeighbors[i0].size();
+      Vector3r &dX = m_dX[i];
+
+      for (unsigned int j = 0; j < numNeighbors; j++) {
+        const unsigned int neighborIndex =
+            m_initial_to_current_index[m_initialNeighbors[i0][j]];
+        if ((int)neighborIndex == i)
+          continue;
+        // get initial neighbor index considering the current particle order
+        const unsigned int neighborIndex0 = m_initialNeighbors[i0][j];
+
+        const Vector3r &xj0 = m_model->getPosition0(neighborIndex0);
+        const Vector3r xj_xi_0 = xj0 - xi0;
+        const Vector3r correctedKernel =
+            m_L[neighborIndex] * sim->gradW(xj_xi_0);
+
+        Vector3r gradH =
+            m_dCHdF[neighborIndex] * m_restVolumes[i] * correctedKernel;
+        Vector3r gradD =
+            m_dCDdF[neighborIndex] * m_restVolumes[i] * correctedKernel;
+        dX += 1. / model->getMass(i) *
+              (m_lambdaD[neighborIndex] * gradD +
+               m_lambdaH[neighborIndex] * gradH);
+      }
+      dX *= 1. / (2. * numNeighbors);
+    }
+  }
+  STOP_TIMING_AVG
 }
 void Elasticity_Wendling2024::computeConstraintD() {}
 void Elasticity_Wendling2024::computeZeroEnergy() {}
@@ -189,7 +309,11 @@ void Elasticity_Wendling2024::step() {
       if (m_model->getParticleState(i) == ParticleState::Active) {
         Vector3r &vel = m_model->getVelocity(i);
         vel += dt * m_model->getAcceleration(i);
+        vel.setZero();
         m_model->getAcceleration(i).setZero();
+        m_pos_prev[i] = m_model->getPosition(i);
+        Vector3r &pos = m_model->getPosition(i);
+        pos += dt * vel;
       }
     }
   }
@@ -197,9 +321,25 @@ void Elasticity_Wendling2024::step() {
   START_TIMING("Elasticity")
 
   computeConstraintH();
-  computeConstraintD();
-  computeZeroEnergy();
+  // computeConstraintD();
+  // computeZeroEnergy();
 
+  STOP_TIMING_AVG
+#pragma omp parallel default(shared)
+  {
+#pragma omp for schedule(static)
+    for (int i = 0; i < (int)numParticles; i++) {
+      if (m_model->getParticleState(i) == ParticleState::Active) {
+        Vector3r &pos = m_model->getPosition(i);
+        pos += m_dX[i];
+
+        Vector3r &vel = m_model->getVelocity(i);
+        vel = (pos - m_pos_prev[i]) / dt;
+
+        pos = m_pos_prev[i];
+      }
+    }
+  }
   STOP_TIMING_AVG
 }
 

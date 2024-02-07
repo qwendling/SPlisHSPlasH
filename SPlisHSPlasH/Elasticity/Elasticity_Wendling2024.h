@@ -22,6 +22,13 @@ protected:
   std::vector<Matrix3r> m_F;
   std::vector<double> m_CD;
   std::vector<double> m_CH;
+  std::vector<Vector3r> m_dFdX;
+  std::vector<Vector3r> m_dX;
+  std::vector<Vector3r> m_pos_prev;
+  std::vector<double> m_lambdaH;
+  std::vector<double> m_lambdaD;
+  std::vector<Matrix3r> m_dCDdF;
+  std::vector<Matrix3r> m_dCHdF;
 
   unsigned int m_iterations;
   unsigned int m_maxIter;
